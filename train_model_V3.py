@@ -1,0 +1,76 @@
+# train_model_V3_incremental.py
+
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import SGDClassifier 
+import joblib
+
+print("Starting incremental training process...")
+
+# --- 1. SETUP ---
+csv_file_path = 'C:/Users/yashg_t6wet39/Desktop/IDS/training/biggest.csv'
+chunk_size = 50000  # You can adjust this chunk size
+features_to_use = [
+    'Dst Port', 'Protocol', 'Flow Duration', 'Tot Fwd Pkts', 'Tot Bwd Pkts',
+    'Fwd Pkt Len Max', 'Bwd Pkt Len Max', 'Flow Byts/s', 'Flow Pkts/s',
+    'Flow IAT Mean', 'Flow IAT Std', 'Flow IAT Max', 'Flow IAT Min',
+    'Fwd IAT Mean', 'Bwd IAT Mean', 'Fwd Header Len', 'Bwd Header Len',
+    'Fwd Pkts/s', 'Bwd Pkts/s', 'Pkt Len Min', 'Pkt Len Max',
+    'FIN Flag Cnt', 'SYN Flag Cnt', 'RST Flag Cnt',
+    'Init Fwd Win Byts', 'Init Bwd Win Byts'
+]
+
+# --- 2. INITIALIZE SCALER AND MODEL ---
+# These will be updated incrementally in the loop
+scaler = StandardScaler()
+# Use SGDClassifier, which supports partial_fit. 
+# loss='log_loss' makes it a logistic regression model.
+# class_weight='balanced' helps with the imbalanced data.
+model = SGDClassifier(loss='log_loss', random_state=42, class_weight='balanced')
+
+
+# --- 3. LOOP THROUGH DATA AND TRAIN INCREMENTALLY ---
+print("Reading CSV and training in chunks...")
+chunk_iterator = pd.read_csv(csv_file_path, chunksize=chunk_size, low_memory=False)
+
+# Get the total number of chunks for a progress indicator
+total_rows = sum(1 for row in open(csv_file_path, 'r')) # A bit slow, but good for progress
+total_chunks = (total_rows // chunk_size) + 1
+chunk_count = 0
+
+for chunk in chunk_iterator:
+    chunk_count += 1
+    print(f"  - Processing chunk {chunk_count}/{total_chunks}...")
+    
+    # --- Perform cleaning on the current chunk ---
+    for col in features_to_use:
+        chunk[col] = pd.to_numeric(chunk[col], errors='coerce')
+    chunk.replace([np.inf, -np.inf], np.nan, inplace=True)
+    chunk.dropna(inplace=True)
+
+    if chunk.empty:
+        continue # Skip empty chunks after cleaning
+        
+    # --- Prepare chunk for training ---
+    chunk['Label'] = chunk['Label'].apply(lambda x: 0 if x == 'Benign' else 1)
+    X_chunk = chunk[features_to_use]
+    y_chunk = chunk['Label']
+    
+    # --- Update the scaler and model with the current chunk ---
+    # Update the scaler's stats with the new chunk
+    scaler.partial_fit(X_chunk)
+    # Scale the current chunk using the updated scaler
+    X_chunk_scaled = scaler.transform(X_chunk)
+    
+    # Update the model with the scaled chunk. 
+    # The `classes` argument is needed for the first fit.
+    model.partial_fit(X_chunk_scaled, y_chunk, classes=np.array([0, 1]))
+
+# --- 4. SAVE THE FULLY TRAINED MODEL AND SCALER ---
+print("\nTraining complete!")
+print("Saving model and scaler to disk...")
+joblib.dump(model, 'ids_model_v2.pkl')
+joblib.dump(scaler, 'scaler_v2.pkl')
+joblib.dump(features_to_use, 'features_v2.pkl')
+print("Model and scaler saved successfully!")

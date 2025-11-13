@@ -1,0 +1,57 @@
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from imblearn.over_sampling import SMOTE 
+import joblib
+import lightgbm as lgb
+
+print("Loading and cleaning data...")
+df = pd.read_csv('C:/Users/yashg_t6wet39/Desktop/IDS/training/biggest.csv')
+df.replace([np.inf, -np.inf], np.nan, inplace=True)
+df['Dst Port'] = pd.to_numeric(df['Dst Port'], errors='coerce')
+df.dropna(inplace=True)
+df['Label'] = df['Label'].apply(lambda x: 0 if x == 'Benign' else 1)
+
+
+features_to_use = [
+    'Dst Port', 'Protocol', 'Flow Duration', 'Tot Fwd Pkts', 'Tot Bwd Pkts',
+    'Fwd Pkt Len Max', 'Bwd Pkt Len Max', 'Flow Byts/s', 'Flow Pkts/s',
+    'Flow IAT Mean', 'Flow IAT Std', 'Flow IAT Max', 'Flow IAT Min',
+    'Fwd IAT Mean', 'Bwd IAT Mean', 'Fwd Header Len', 'Bwd Header Len',
+    'Fwd Pkts/s', 'Bwd Pkts/s', 'Pkt Len Min', 'Pkt Len Max',
+    'FIN Flag Cnt', 'SYN Flag Cnt', 'RST Flag Cnt',
+    'Init Fwd Win Byts', 'Init Bwd Win Byts'
+]
+X = df[features_to_use]
+y = df['Label']
+
+
+# We fit the scaler on the entire dataset so it learns the global min/max of our data
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+
+
+# --- 5. Apply SMOTE to the TRAINING data ---
+print("Applying SMOTE to balance the training data...")
+smote = SMOTE(random_state=42)
+X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
+
+print("Original training set shape:", y_train.value_counts())
+print("Resampled training set shape:", y_train_resampled.value_counts())
+
+# model training
+print("Training the model...")
+model = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1) # class_weight='balanced'
+# model = lgb.LGBMClassifier(objective='binary', random_state=42, n_jobs=-1)
+model.fit(X_train_resampled, y_train_resampled)
+print(f"Model Accuracy on Test Set: {model.score(X_test, y_test):.4f}")
+
+print("Saving model and scaler to disk...")
+joblib.dump(model, 'ids_model_v3.pkl')
+joblib.dump(scaler, 'scaler_v3.pkl')
+joblib.dump(features_to_use, 'features_v3.pkl')
+print("Model and scaler saved successfully!")
+print((df.columns))
